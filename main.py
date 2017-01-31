@@ -42,7 +42,7 @@ def parseCommandLineArgs():
 	configParser.set_defaults(name='config')
 	configParser.add_argument('-f', '--file', help='ADDS THE FILE PATH TO CONFIGURATION')
 	configParser.add_argument('-k', '--key-not-found', help='ACTION TO PERFORM WHEN KEY IS NOT FOUND IN USER FILE', choices=['EXIT', 'PASS'], dest='whenKeyNotFound')
-	configParser.add_argument('-s', '--source', help='DEFAULT SOURCE FOR KEY, CURRENTLY SET TO BOOKMARK')
+	configParser.add_argument('-s', '--source', help='DEFAULT SOURCE FOR KEY, CURRENTLY SET TO BOOKMARK', choices=['DATA', 'BOOKMARK'])
 	configParser.add_argument('-c', '--color-on-windows', help='ACTIVATES COLORS ON WINDOWS CMD', choices=['TRUE', 'FALSE'], dest='activeColorOnWindows')
 	
 			
@@ -52,6 +52,7 @@ def parseCommandLineArgs():
 	execParser.add_argument('key', help='KEY WHOSE DATA WILL BE PASSED AS ARGUMENT TO COMMAND')
 	execParser.add_argument('-f', '--file',  help='USER FILE FROM WHICH KEY WILL BE PARSED')
 	execParser.add_argument('-a', '--append-arg', help='INSTEAD OF PASSING AS ARGUMENT TO COMMAND ARGUMENT IS CONCATENATED WITH COMMAND STRING', dest='appendArg')
+	# execParser.add_argument('-i', '--ignore-colon', help='IGNORES BEHAVIOR OF COLON WHEN SOURCE IS "BOOKMARK"', dest='ignoreColumn')
 			
 	sourceGroup = execParser.add_mutually_exclusive_group()
 	sourceGroup.add_argument('-d', '--data', help='SETS THE KEY SOURCE AS DATA', action='store_true')

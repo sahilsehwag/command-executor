@@ -24,7 +24,7 @@ class Configuration:
 
 	
 	def init(self):		
-		self.set(GENERAL, SOURCE, KeyType.BOOKMARK.name)
+		self.set(GENERAL, SOURCE, KeyType.DATA.name)
 		self.set(GENERAL, WHEN_KEY_NOT_FOUND, 'EXIT')
 		self.set(GENERAL, ACTIVATE_COLOR_ON_WINDOWS, 'TRUE')
 		self.set(USER, FILE, '')
