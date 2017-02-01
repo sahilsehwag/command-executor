@@ -21,6 +21,7 @@ from keytype import KeyType
 
 keyType = None
 flags = {}
+args = None
 
 config = Configuration(CONFIG)
 logger = Logger(config.getConfig().getboolean(GENERAL, ACTIVATE_COLOR_ON_WINDOWS))
@@ -51,8 +52,10 @@ def parseCommandLineArgs():
 	execParser.add_argument('command', help='COMMAND TO EXECUTE')
 	execParser.add_argument('key', help='KEY WHOSE DATA WILL BE PASSED AS ARGUMENT TO COMMAND')
 	execParser.add_argument('-f', '--file',  help='USER FILE FROM WHICH KEY WILL BE PARSED')
-	execParser.add_argument('-a', '--append-arg', help='INSTEAD OF PASSING AS ARGUMENT TO COMMAND ARGUMENT IS CONCATENATED WITH COMMAND STRING', dest='appendArg')
-	# execParser.add_argument('-i', '--ignore-colon', help='IGNORES BEHAVIOR OF COLON WHEN SOURCE IS "BOOKMARK"', dest='ignoreColumn')
+	execParser.add_argument('-a', '--append-arg', help='INSTEAD OF PASSING AS ARGUMENT TO COMMAND ARGUMENT IS CONCATENATED WITH COMMAND STRING', action='store_true', dest='appendArg')
+	execParser.add_argument('-k', '--key-not-found', help='ACTION TO PERFORM WHEN KEY IS NOT FOUND, EXIT OR PASS KEY STRING ITSELF TO THE COMMAND', choices=['EXIT', 'PASS'], dest='whenKeyNotFound')
+	execParser.add_argument('-s', '--shell', help='INSTEAD OF EXECUTING COMMAND, PASSES COMMAND TO SHELL', action='store_true')
+	# execParser.add_argument('-i', '--ignore-colon', help='IGNORES BEHAVIOR OF COLON WHEN SOURCE IS "BOOKMARK"', action='store_true', dest='ignoreColon')
 			
 	sourceGroup = execParser.add_mutually_exclusive_group()
 	sourceGroup.add_argument('-d', '--data', help='SETS THE KEY SOURCE AS DATA', action='store_true')
@@ -61,9 +64,10 @@ def parseCommandLineArgs():
 	
 	infoParser = subParsers.add_parser('info')
 	infoParser.set_defaults(name='info')
-	infoParser.add_argument('-s', '--source', help='DEFAULT SOURCE FOR KEY', action='store_true', default=True)
-	infoParser.add_argument('-k', '--key-not-found', help='DEFAULT ACTION WHEN KEY IS NOT FOUND (EXIT, PASS)', action='store_true', dest='whenKeyNotFound', default=True)
-	infoParser.add_argument('-f', '--file', help='PATH FOR DEFAULT USER FILE', action='store_true', default=True)
+	infoParser.add_argument('-s', '--source', help='DEFAULT SOURCE FOR KEY', action='store_true')
+	infoParser.add_argument('-k', '--key-not-found', help='DEFAULT ACTION WHEN KEY IS NOT FOUND (EXIT, PASS)', action='store_true', dest='whenKeyNotFound')
+	infoParser.add_argument('-f', '--file', help='PATH FOR DEFAULT USER FILE', action='store_true')
+	infoParser.add_argument('-c', '--color-on-windows', help='WHETHER COLORS ARE ACTIVE ON WINDOWS CMD', action='store_true', dest='activeColorOnWindows')
 	
 	return parser.parse_args()
 	
@@ -125,6 +129,17 @@ def infoHandler(args):
 	if args.whenKeyNotFound is True:
 		logger.log('DEFAULT ACTION WHEN KEY IS NOT FOUND: ' + config.get(GENERAL, WHEN_KEY_NOT_FOUND))
 
+	if args.activeColorOnWindows is True:
+		logger.log('IF COLOR IS ACTIVE ON WINDOWS: ' + config.get(GENERAL, ACTIVATE_COLOR_ON_WINDOWS))
+
+	if args.whenKeyNotFound is False and args.source is False and args.file is False and args.activeColorOnWindows is False:
+		
+		logger.log('DEFAULT SOURCE: ' + config.get(GENERAL, SOURCE))
+		logger.log('USER FILE PATH: ' + config.get(USER, FILE))
+		logger.log('DEFAULT ACTION WHEN KEY IS NOT FOUND: ' + config.get(GENERAL, WHEN_KEY_NOT_FOUND))
+		logger.log('IF COLOR IS ACTIVE ON WINDOWS: ' + config.get(GENERAL, ACTIVATE_COLOR_ON_WINDOWS))
+
+
 	exit(2)
 
 def getFileContent(fileName):
@@ -153,28 +168,34 @@ def parseFileContent(inputFile):
 	return (parsedJSON['COMMANDS'], parsedJSON['BOOKMARKS'], parsedJSON['DATA'])
 
 def getCommand(commands, command):
-	def parseCommand(command):
-		appendArgOption = command[0]
-		
-		cmd = ''
-		options = {}
+	global args
 
-		if appendArgOption == '@':
-			options['a'] = True
-			cmd = command[1:]			
-		else:
-			options['a'] = False
-			cmd = command
-		return (cmd, options)
+	def parseCommandOptions(command):
+		options = dict()
+		if 'a' in command:
+			options['a'] = command['a']
+		else: options['a'] = False
 
-	try:
-		command = commands[command]
-		return parseCommand(command)		
-	except Exception:
-		return (command, None)
+		if 's' in command:
+			options['s'] = command['s']
+		else: options['s'] = False
+
+		return options
+
+	if command in commands:
+		commandOptions = parseCommandOptions(commands[command])			
+		return commands[command]['cmd'], commandOptions
+	else: 
+		commandOptions = {
+			'a': args.appendArg,
+			'k': args.whenKeyNotFound,
+			's': args.shell,
+		}
+		return (command, commandOptions)
 
 def getKeyValue(content, key, type=KeyType.BOOKMARK):
 	global logger
+	global args
 
 	onKeyNotFound = config.get(GENERAL, WHEN_KEY_NOT_FOUND)
 
@@ -195,7 +216,13 @@ def getKeyValue(content, key, type=KeyType.BOOKMARK):
 			for k in key.split('.'):
 				tempk = k
 				value = value[k]
-			return value, False
+
+			if isinstance(value, dict):
+				logger.info('NOT A COMPLETE KEY')
+				pprint(value)
+			elif isinstance(value, str):
+				return value, False
+
 		except Exception:
 			logger.error('KEY "' + tempk + '" NOT FOUND')
 			if onKeyNotFound == 'PASS':
@@ -217,50 +244,33 @@ def getKeyValue(content, key, type=KeyType.BOOKMARK):
 
 
 	if type == KeyType.DATA:
-		if ':' in key:
-			logger.warning('":" FOUND IN NON-BOOKMARK KEY')
-			exit(2)
 		return getDataValue(content['DATA'], key)
 	elif type == KeyType.BOOKMARK:
 		if key.count(':') >= 1:
 			if key.count(':') > 1:
-				logger.warning('MULTIPLE ":" FOUND IN BOOKMARK KEY')
+				logger.warn('MULTIPLE ":" FOUND IN BOOKMARK KEY')
 				logger.info('FIRST ":" WILL BE USED AS REFERENCE TO PARSE KEY')
-
+				
 			return resolveKey(content, key)
 		else:
 			return getBookmarkValue(content, key)
 
-def executeCommand(command, commandOptions, value, KEY_NOT_FOUND):
+def executeCommand(command, commandOptions, value, KEY_FOUND):
 	global logger
-	global flags
 
-	if commandOptions:
-		if commandOptions['a'] is True:
-			flags['a'] = commandOptions['a']	
+	if flags['a'] is True or commandOptions['a'] is True:
+		try:
+			subprocess.run(command + value, shell=(commandOptions['s'] or args.shell))
+		except Exception:
+			logger.error('ERROR IN COMMAND "' + command+value + '"')
+			exit(-1)
+	else:
+		try:
+			subprocess.run([command, value], shell=(commandOptions['s'] or args.shell))
+		except Exception:
+			logger.error('ERROR IN COMMAND "' + command + ' ' + value + '"')
+			exit(-1)
 
-	if KEY_NOT_FOUND:
-
-		if flags['a'] is True:
-			os.system(command + value)
-		else:
-			os.system(command + ' ' + value)
-
-	elif KEY_NOT_FOUND is False:
-
-		if flags['a'] is True:
-			os.system(command + value)			
-		else:
-			command = command.split(' ')
-			command.append(value)
-
-			try:
-				subprocess.run(command)
-			except Exception:
-				logger.error('ERROR IN COMMAND')
-				exit(-1)
-
-	
 
 
 
@@ -268,6 +278,7 @@ def executeCommand(command, commandOptions, value, KEY_NOT_FOUND):
 
 
 def main():
+	global args
 	init()	
 	args = parseCommandLineArgs()
 
@@ -282,7 +293,7 @@ def main():
 		(command, commandOptions) = getCommand(commands, command)
 		(value, KEY_NOT_FOUND) = getKeyValue({ 'DATA':data,'BOOKMARK':bookmarks }, key, type=keyType)
 
-		executeCommand(command, commandOptions, value, KEY_NOT_FOUND)
+		executeCommand(command, commandOptions, value, not KEY_NOT_FOUND)
 	else: exit(-1)
 	
 
